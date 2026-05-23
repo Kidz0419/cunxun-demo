@@ -16,6 +16,7 @@ npm run dev
 - `GET /api/shops/:shopId`
 - `POST /api/shop-twin-chat`
 - `GET /api/health`
+- `GET /api/amap-config`
 
 ## 环境变量
 
@@ -35,6 +36,30 @@ OPERATOR_API_TOKEN=
 ```
 
 不要提交 `.env.local`、DeepSeek key、Supabase service-role key、高德密钥或任何生产 token。
+
+## 真实高德地图与 Supabase
+
+`http://localhost:5173` 的 iPhone Web 版会请求 `/api/amap-config` 加载高德 JSAPI。推荐配置：
+
+```bash
+VITE_AMAP_KEY=你的高德 Web端 JS API Key
+AMAP_SECURITY_JS_CODE=你的高德安全密钥
+```
+
+`AMAP_SECURITY_JS_CODE` 只在 Node 后端使用，前端会拿到 `serviceHost: "/_AMapService"`，由后端代理追加安全密钥。
+
+Supabase 初始化：
+
+```bash
+# 在 Supabase SQL Editor 里执行
+docs/supabase-npc-submissions.sql
+docs/supabase-shop-profiles.sql
+
+# 写入 v2 小店种子
+npm run seed:shops
+```
+
+完成后重启 `npm run dev`，打开 `/api/health` 应看到 `Supabase 小店目录` 和 `高德地图已配置`。
 
 ## iPhone 原生版本
 

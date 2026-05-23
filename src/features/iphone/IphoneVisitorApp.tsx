@@ -17,8 +17,12 @@ import {
   Wine
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { RealMapBackdrop } from "../../components/RealMapBackdrop";
 import { shopProfiles } from "../../data/shopProfiles";
+import { projectCoordinatesToMapPercent } from "../../domain/geoProjection";
+import { fallbackSystemStatus, fetchSystemStatus } from "../../services/systemStatusClient";
 import type { FormEvent, ReactNode } from "react";
+import type { SystemStatusResponse } from "../../shared/systemStatus";
 import type { ShopCategory, ShopProfile, ShopStatus, ShopTwinChatMessage } from "../../shared/shopContract";
 
 type ShopVillageFilter = ShopProfile["village"] | "all";
@@ -103,6 +107,7 @@ export function IphoneVisitorApp() {
   ]);
   const [isSending, setIsSending] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [systemStatus, setSystemStatus] = useState<SystemStatusResponse>(fallbackSystemStatus);
 
   useEffect(() => {
     let ignore = false;
@@ -124,6 +129,20 @@ export function IphoneVisitorApp() {
           setIsOnline(false);
         }
       });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    fetchSystemStatus().then((status) => {
+      if (!ignore) {
+        setSystemStatus(status);
+      }
+    });
 
     return () => {
       ignore = true;
@@ -223,6 +242,16 @@ export function IphoneVisitorApp() {
             </div>
             <h1>村寻</h1>
             <p className="iphone-subtitle">山路、老屋、手艺和今日可拜访的小店</p>
+            <div className="iphone-service-strip" aria-label="后端服务状态">
+              <span className={`iphone-service-pill is-${systemStatus.services.map.status}`}>
+                {systemStatus.services.map.status === "amap_ready" ? "高德底图" : systemStatus.services.map.label}
+              </span>
+              <span className={`iphone-service-pill is-${systemStatus.services.shopDirectory.status}`}>
+                {systemStatus.services.shopDirectory.status === "supabase_connected"
+                  ? "Supabase 小店"
+                  : systemStatus.services.shopDirectory.label}
+              </span>
+            </div>
           </header>
 
           <ChipRail>
@@ -368,12 +397,8 @@ function IllustratedShopMap({
   shops: ShopProfile[];
 }) {
   return (
-    <section className="iphone-village-map" aria-label="村寻地图">
-      <div className="iphone-map-rice-field field-one" />
-      <div className="iphone-map-rice-field field-two" />
-      <div className="iphone-map-rice-field field-three" />
-      <div className="iphone-map-road" />
-      <div className="iphone-map-river" />
+    <section className="iphone-village-map is-real-map" aria-label="村寻真实地图">
+      <RealMapBackdrop />
       <span className="iphone-map-label label-longtan">龙潭</span>
       <span className="iphone-map-label label-jixia">际下</span>
       <span className="iphone-map-label label-xiadi">下地</span>
@@ -381,13 +406,14 @@ function IllustratedShopMap({
       {shops.map((shop) => {
         const Icon = getCategoryIcon(shop.category);
         const isSelected = shop.id === selectedShop?.id;
+        const position = projectCoordinatesToMapPercent(shop.coordinates);
         return (
           <button
             aria-label={`选择${shop.name}`}
             className={isSelected ? `iphone-map-pin is-${shop.category} is-selected` : `iphone-map-pin is-${shop.category}`}
             key={shop.id}
             onClick={() => onSelect(shop)}
-            style={{ left: `${shop.mapPosition.x * 100}%`, top: `${shop.mapPosition.y * 100}%` }}
+            style={{ left: `${position.x}%`, top: `${position.y}%` }}
             type="button"
           >
             {isSelected ? <strong>{shop.name}</strong> : null}

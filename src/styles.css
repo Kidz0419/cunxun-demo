@@ -4820,6 +4820,33 @@ h1::after {
   max-width: 270px;
 }
 
+.iphone-service-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.iphone-service-pill {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid rgba(23, 37, 31, 0.1);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgba(255, 250, 240, 0.74);
+  color: var(--iphone-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.iphone-service-pill.is-amap_ready,
+.iphone-service-pill.is-supabase_connected {
+  border-color: rgba(33, 79, 61, 0.18);
+  background: rgba(33, 79, 61, 0.1);
+  color: var(--iphone-moss);
+}
+
 .iphone-chip-rail {
   display: flex;
   gap: 8px;
@@ -4876,6 +4903,22 @@ h1::after {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5), 0 16px 32px rgba(58, 79, 61, 0.16);
 }
 
+.iphone-village-map.is-real-map {
+  background: #dce5d8;
+}
+
+.iphone-village-map.is-real-map .real-map-backdrop {
+  opacity: 1;
+}
+
+.iphone-village-map.is-real-map .amap-canvas {
+  opacity: 0.98;
+}
+
+.iphone-village-map.is-real-map .osm-tile-grid img {
+  filter: saturate(0.84) contrast(0.95) brightness(1.04) sepia(0.04);
+}
+
 .iphone-village-map::before {
   position: absolute;
   inset: 22px 24px;
@@ -4883,6 +4926,33 @@ h1::after {
   border-radius: 36% 42% 38% 44%;
   content: "";
   transform: rotate(-9deg);
+}
+
+.iphone-village-map.is-real-map::before {
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 240, 0.18), transparent 34%),
+    linear-gradient(0deg, rgba(247, 241, 223, 0.24), transparent 30%);
+  transform: none;
+  pointer-events: none;
+}
+
+.iphone-village-map.is-real-map .real-map-source {
+  right: 12px;
+  bottom: 10px;
+  z-index: 6;
+  border-color: rgba(23, 37, 31, 0.1);
+  padding: 5px 8px;
+  background: rgba(255, 250, 240, 0.86);
+  color: var(--iphone-muted);
+  font-size: 10px;
+}
+
+.iphone-village-map.is-real-map .real-map-source strong {
+  color: var(--iphone-moss);
 }
 
 .iphone-map-rice-field {
@@ -4953,6 +5023,7 @@ h1::after {
 
 .iphone-map-label {
   position: absolute;
+  z-index: 3;
   border-radius: 999px;
   padding: 5px 9px;
   background: rgba(255, 250, 240, 0.72);
@@ -4980,7 +5051,7 @@ h1::after {
   --pin: var(--iphone-moss);
   --pin-ink: #fffaf0;
   position: absolute;
-  z-index: 2;
+  z-index: 4;
   display: inline-flex;
   align-items: center;
   border: 0;

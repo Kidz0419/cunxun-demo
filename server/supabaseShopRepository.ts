@@ -5,7 +5,8 @@ import {
   defaultShopProfiles,
   shopDirectorySchemaVersion,
   type ShopProfilePatch,
-  type ShopRepository
+  type ShopRepository,
+  type ShopStoreStatus
 } from "./shopRepository.js";
 
 type ShopProfileRow = {
@@ -83,11 +84,24 @@ async function selectShopById(client: SupabaseClient, shopId: string): Promise<S
     : defaultShopProfiles.find((shop) => shop.id === shopId) ?? null;
 }
 
+async function probeShopStoreStatus(client: SupabaseClient): Promise<ShopStoreStatus> {
+  const { error } = await client.from(tableName).select("id").limit(1);
+
+  if (isMissingShopTableError(error)) {
+    return "missing_table";
+  }
+
+  return error ? "unavailable" : "ready";
+}
+
 export function createSupabaseShopRepository(options: SupabaseShopRepositoryOptions): ShopRepository {
   const client = createServerClient(options);
 
   return {
     kind: "supabase",
+    async getStoreStatus() {
+      return probeShopStoreStatus(client);
+    },
     async listShopProfiles(query: ShopDirectoryQuery = {}) {
       return filterShopProfiles(await selectAllShopProfiles(client), query);
     },

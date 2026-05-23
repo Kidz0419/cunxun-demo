@@ -15,9 +15,11 @@ import {
 export { shopDirectorySchemaVersion };
 
 export type ShopProfilePatch = Partial<Omit<ShopProfile, "id">>;
+export type ShopStoreStatus = "ready" | "missing_table" | "unavailable";
 
 export type ShopRepository = {
   kind: "memory" | "supabase";
+  getStoreStatus?: () => Promise<ShopStoreStatus>;
   listShopProfiles: (query?: ShopDirectoryQuery) => Promise<ShopProfile[]>;
   getShopProfile: (shopId: string) => Promise<ShopProfile | null>;
   upsertShopProfile: (shop: ShopProfile) => Promise<ShopProfile>;
@@ -52,6 +54,9 @@ export function createMemoryShopRepository(
 
   return {
     kind: "memory",
+    async getStoreStatus() {
+      return "ready";
+    },
     async listShopProfiles(query = {}) {
       return filterShopProfiles(shops, query);
     },

@@ -18,7 +18,8 @@ import {
   parseShopDirectoryQuery,
   shopDirectorySchemaVersion,
   type ShopProfilePatch,
-  type ShopRepository
+  type ShopRepository,
+  type ShopStoreStatus
 } from "./shopRepository.js";
 import { createSupabaseShopRepositoryFromEnv } from "./supabaseShopRepository.js";
 
@@ -82,13 +83,14 @@ const createAmapProxyUrl = (originalUrl: string, securityJsCode: string) => {
 const createSystemStatus = (
   npcRepository: NpcRepository,
   shopRepository: ShopRepository,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  shopStoreStatus: ShopStoreStatus = "ready"
 ): SystemStatusResponse => {
   const hasDeepSeek = Boolean(env.DEEPSEEK_API_KEY);
   const hasAmap = Boolean(getAmapKey(env));
   const hasAmapProxy = Boolean(getAmapSecurityCode(env));
   const hasSupabase = npcRepository.kind === "supabase";
-  const hasSupabaseShopDirectory = shopRepository.kind === "supabase";
+  const hasSupabaseShopDirectory = shopRepository.kind === "supabase" && shopStoreStatus === "ready";
 
   return {
     ok: true,
@@ -112,6 +114,18 @@ const createSystemStatus = (
             label: "Supabase 小店目录",
             detail: "v2 主理人小店资料会写入 Supabase，游客端按筛选读取"
           }
+        : shopRepository.kind === "supabase" && shopStoreStatus === "missing_table"
+          ? {
+              status: "local_demo",
+              label: "Supabase 表未初始化",
+              detail: "已配置 Supabase key，但缺少 public.shop_profiles；当前使用 v2 原型种子数据兜底"
+            }
+          : shopRepository.kind === "supabase" && shopStoreStatus === "unavailable"
+            ? {
+                status: "local_demo",
+                label: "Supabase 暂不可用",
+                detail: "已配置 Supabase key，但小店表暂时不可访问；当前使用 v2 原型种子数据兜底"
+              }
         : {
             status: "local_demo",
             label: "本地小店目录",
@@ -210,8 +224,9 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/api/health", (_request, response) => {
-    response.json(createSystemStatus(npcRepository, shopRepository, env));
+  app.get("/api/health", async (_request, response) => {
+    const shopStoreStatus = (await shopRepository.getStoreStatus?.()) ?? "ready";
+    response.json(createSystemStatus(npcRepository, shopRepository, env, shopStoreStatus));
   });
 
   app.get("/api/amap-config", (_request, response) => {

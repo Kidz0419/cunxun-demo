@@ -47,9 +47,11 @@ npm run check:ready
 1. 在 Supabase 新建项目。
 2. 打开 SQL Editor。
 3. 执行 `docs/supabase-npc-submissions.sql`。
-4. 把 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY` 写入 `.env.local`。
-5. 重启本地服务。
-6. 打开 `/api/health`，确认：
+4. 执行 `docs/supabase-shop-profiles.sql`。
+5. 把 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY` 写入 `.env.local`。
+6. 运行 `npm run seed:shops`，把 v2 小店种子写入 Supabase。
+7. 重启本地服务。
+8. 打开 `/api/health`，确认：
 
 ```json
 {
@@ -57,6 +59,9 @@ npm run check:ready
   "services": {
     "npcDirectory": {
       "label": "Supabase 已连接"
+    },
+    "shopDirectory": {
+      "label": "Supabase 小店目录"
     }
   }
 }
@@ -100,7 +105,7 @@ npm start
 
 ## 仍需要人工完成
 
-- Supabase：创建项目、执行 SQL、复制 URL 和 `service_role` key。
+- Supabase：创建项目、执行两份 SQL、复制 URL 和 `service_role` key，并运行 `npm run seed:shops`。
 - 高德：创建 Web端 JS API Key、安全密钥，并设置本地与正式域名白名单；Key 填 `VITE_AMAP_KEY`，安全密钥填 `AMAP_SECURITY_JS_CODE`。
 - DeepSeek：创建 API Key。
 - 上线托管：选择一个 Node 服务托管平台，配置上述环境变量。

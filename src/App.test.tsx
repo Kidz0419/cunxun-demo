@@ -14,6 +14,50 @@ const mockFetch = (reply = "沿着主路到陶坊门口，先看今日营业牌�
       };
     }
 
+    if (requestUrl.includes("/api/amap-config")) {
+      return {
+        ok: true,
+        json: async () => ({
+          enabled: true,
+          key: "test-amap-key",
+          serviceHost: "/_AMapService"
+        })
+      };
+    }
+
+    if (requestUrl.includes("/api/health")) {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          provider: "deepseek",
+          npcStore: "supabase",
+          services: {
+            npcDirectory: {
+              status: "supabase_connected",
+              label: "Supabase 已连接",
+              detail: "新村民资料会写入 Supabase"
+            },
+            shopDirectory: {
+              status: "supabase_connected",
+              label: "Supabase 小店目录",
+              detail: "小店资料由 Supabase 提供"
+            },
+            ai: {
+              status: "deepseek_connected",
+              label: "DeepSeek 在线",
+              detail: "数字分身回复由 DeepSeek 生成"
+            },
+            map: {
+              status: "amap_ready",
+              label: "高德地图已配置",
+              detail: "真实底图可加载高德 JSAPI，安全密钥由后端代理转发"
+            }
+          }
+        })
+      };
+    }
+
     return {
       ok: true,
       json: async () => ({ shops: shopProfiles })
@@ -30,6 +74,11 @@ afterEach(() => {
   window.sessionStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  document.head.querySelectorAll("script[data-cunxun-amap-loader]").forEach((script) => {
+    script.remove();
+  });
+  window._AMapSecurityConfig = undefined;
+  window.AMap = undefined;
 });
 
 describe("Cunxun iPhone web demo", () => {
@@ -42,11 +91,15 @@ describe("Cunxun iPhone web demo", () => {
     expect(screen.getByRole("heading", { name: "村寻" })).toBeInTheDocument();
     expect(screen.getByText("屏南 · 四坪村")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "今日店铺" })).toBeInTheDocument();
+    expect(screen.getByLabelText("村寻真实地图")).toBeInTheDocument();
+    expect(screen.getByLabelText("真实地图底图")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "游客" })).toHaveClass("is-active");
 
     await waitFor(() => {
       expect(screen.getByLabelText("老周陶坊推荐卡")).toBeInTheDocument();
     });
+    expect(await screen.findByText("高德底图")).toBeInTheDocument();
+    expect(screen.getByText("Supabase 小店")).toBeInTheDocument();
   });
 
   it("filters the phone map to shop categories without the old visitor map UI", async () => {
@@ -58,7 +111,7 @@ describe("Cunxun iPhone web demo", () => {
       expect(fetchMock).toHaveBeenCalled();
     });
 
-    expect(screen.queryByText("真实底图")).not.toBeInTheDocument();
+    expect(screen.getByText("真实底图")).toBeInTheDocument();
     expect(screen.getAllByText("老周陶坊").length).toBeGreaterThan(0);
     expect(screen.getByText("小溪茶舍")).toBeInTheDocument();
 
