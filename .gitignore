@@ -1,6 +1,10 @@
 node_modules/
 dist/
 artifacts/
+output/
+.DS_Store
+.agents/
+.claude/
 .env
 .env.local
 .env.*.local
@@ -9,3 +13,7 @@ vite.config.js
 vite.config.d.ts
 .vercel
 .superpowers/
+supabase/.temp/
+ios/**/xcuserdata/
+ios/**/DerivedData/
+*.xcuserstate
