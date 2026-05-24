@@ -1,5 +1,7 @@
 import {
+  BedDouble,
   Bot,
+  ChevronDown,
   CheckCircle2,
   Compass,
   ExternalLink,
@@ -14,6 +16,7 @@ import {
   RotateCcw,
   Send,
   Sparkles,
+  Utensils,
   UserPlus,
   UserRound,
   X
@@ -22,25 +25,13 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { mapTuning } from "../../config/mapTuning";
-import {
-  demoNpcClusters,
-  demoNpcPoints,
-  getDensityPreviewPoints,
-  getDensityViewMode,
-  getFeaturedMarkerMode
-} from "../../data/demoNpcDensity";
+import { getFeaturedMarkerMode } from "../../data/demoNpcDensity";
 import { npcs as baseNpcs } from "../../data/npcs";
-import { villagePlaces, type VillagePlaceCategory } from "../../data/villagePlaces";
 import { createGeneratedPlaceholderVisualAsset } from "../../data/visualAssets";
 import { RealMapBackdrop } from "../../components/RealMapBackdrop";
 import { loadCustomNpcs, saveCustomNpcs } from "../../domain/customNpcStorage";
 import { createAmapNavigationUrl } from "../../domain/amapNavigation";
-import {
-  discoveryFilters,
-  filterDemoNpcPoints,
-  getDiscoveryFilterLabel,
-  summarizeClustersForFilter
-} from "../../domain/discoveryFilters";
+import { discoveryFilters } from "../../domain/discoveryFilters";
 import type { DiscoveryFilterId } from "../../domain/discoveryFilters";
 import {
   realVillageAnchors,
@@ -54,6 +45,7 @@ import {
   type VillagerSubmission
 } from "../../domain/npcSubmission";
 import { sendNpcChat } from "../../services/chatClient";
+import { fetchAmapVillagePois } from "../../services/amapPoiClient";
 import {
   deleteVillagerSubmission,
   fetchApprovedCustomNpcs,
@@ -62,6 +54,7 @@ import {
   updateVillagerSubmissionStatus
 } from "../../services/npcDirectoryClient";
 import { fallbackSystemStatus, fetchSystemStatus } from "../../services/systemStatusClient";
+import type { AmapPoi } from "../../shared/amapPoiContract";
 import { AvailabilityTag } from "./npc-panel/AvailabilityTag";
 import { BoundariesDetails } from "./npc-panel/BoundariesDetails";
 import { QuestCard } from "./npc-panel/QuestCard";
@@ -87,8 +80,7 @@ const {
   minZoom: minMapZoom,
   maxZoom: maxMapZoom,
   zoomStep: mapZoomStep,
-  nearbyFocusMinZoom,
-  nearbyNpcRadiusMeters
+  nearbyFocusMinZoom
 } = mapTuning;
 
 const createInitialMessages = (npc: Npc): ChatMessage[] => [
@@ -111,16 +103,19 @@ const buildRoutePath = (from: { x: number; y: number }, to: { x: number; y: numb
   return `M ${from.x} ${from.y} C ${controlX} ${controlY}, ${controlX} ${controlY}, ${to.x} ${to.y}`;
 };
 
-const getVillageDensityId = (village: Village) => (village === "龙潭村" ? "longtan" : "siping");
 const getVillageId = (village: Village): VillageId => (village === "龙潭村" ? "longtan" : "siping");
 const getVillageFromVillageId = (villageId: VillageId): Village =>
   villageId === "longtan" ? "龙潭村" : "四坪村";
-const getVillageShortLabel = (village: Village) => (village === "龙潭村" ? "龙潭" : "四坪");
 
 const villageSwitchOptions: Array<{ id: VillageId; label: Village }> = [
   { id: "siping", label: "四坪村" },
   { id: "longtan", label: "龙潭村" }
 ];
+
+const amapPoiCategoryLabels = {
+  stay: "高德民宿",
+  food: "高德餐厅"
+} as const;
 
 const defaultNpcIdByVillage: Record<Village, string> = {
   龙潭村: "alan",
@@ -152,37 +147,6 @@ const matchesNpcThemeFilter = (npc: Npc, filterId: DiscoveryFilterId) => {
   return ["书", "采风", "星空", "记录", "桥", "驻留"].some((keyword) =>
     searchableText.includes(keyword.toLowerCase())
   );
-};
-
-const matchesPlaceThemeFilter = (
-  place: { name: string; category: VillagePlaceCategory },
-  filterId: DiscoveryFilterId
-) => {
-  if (filterId === "all" || filterId === "longtan" || filterId === "siping") return true;
-
-  if (filterId === "craft") {
-    return place.category === "field" || ["农园", "溪", "田", "柿树"].some((keyword) => place.name.includes(keyword));
-  }
-
-  if (filterId === "stay") {
-    return place.category === "heritage" && ["民宿", "松韩屋", "浅草"].some((keyword) => place.name.includes(keyword));
-  }
-
-  return (
-    place.category === "learning" ||
-    place.category === "landscape" ||
-    ["书", "营地", "采风", "桥"].some((keyword) => place.name.includes(keyword))
-  );
-};
-
-const placeCategoryMeta: Record<VillagePlaceCategory, { label: string; accent: string }> = {
-  arrival: { label: "入口", accent: "#a94f3e" },
-  bridge: { label: "桥与路", accent: "#1f7180" },
-  heritage: { label: "古厝", accent: "#776245" },
-  learning: { label: "公共空间", accent: "#5f6e3d" },
-  landscape: { label: "山水参照", accent: "#3d7582" },
-  public: { label: "集合点", accent: "#8a5f2d" },
-  field: { label: "土地线索", accent: "#3f7a5b" }
 };
 
 type BuilderStepId = "space" | "welcome" | "boundaries";
@@ -273,7 +237,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
   const allNpcs = useMemo(() => [...baseNpcs, ...approvedCustomNpcs], [approvedCustomNpcs]);
   const [activeVillageId, setActiveVillageId] = useState<VillageId>(initialVillageId);
   const activeVillage = getVillageFromVillageId(activeVillageId);
-  const activeVillageShortLabel = getVillageShortLabel(activeVillage);
   const activeBaseNpcs = useMemo(
     () => baseNpcs.filter((npc) => npc.village === activeVillage),
     [activeVillage]
@@ -318,18 +281,19 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
   const [locationStatus, setLocationStatus] = useState("Demo 位置已开启");
   const [routePanelOpen, setRoutePanelOpen] = useState(false);
   const [isTalkingMapCardOpen, setIsTalkingMapCardOpen] = useState(true);
-  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [chatStatus, setChatStatus] = useState("本地兜底已就绪");
   const [isChatResponding, setIsChatResponding] = useState(false);
   const [chatActionsByNpc, setChatActionsByNpc] = useState<Record<string, ChatAction[]>>({});
   const [isChatFocusActive, setIsChatFocusActive] = useState(false);
   const [isSheetExpanded, setIsSheetExpanded] = useState(false);
   const [mapView, setMapView] = useState({ zoom: 1, x: 0, y: 0 });
+  const [amapPoisByVillage, setAmapPoisByVillage] = useState<Record<VillageId, AmapPoi[]>>({
+    longtan: [],
+    siping: []
+  });
   const [isMapPanning, setIsMapPanning] = useState(false);
   const [hasLocatedVisitor, setHasLocatedVisitor] = useState(false);
-  const [showDensityPreviewPoints, setShowDensityPreviewPoints] = useState(false);
   const [discoveryFilterId, setDiscoveryFilterId] = useState<DiscoveryFilterId>("all");
-  const [focusedClusterId, setFocusedClusterId] = useState<string | null>(null);
   const [isMapGuideVisible, setIsMapGuideVisible] = useState(() => {
     if (typeof window === "undefined") return true;
     return window.sessionStorage.getItem(mapGuideStorageKey) !== "true";
@@ -401,6 +365,23 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
     };
   }, [shouldLoadSubmissionDirectory]);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    fetchAmapVillagePois(activeVillageId).then((pois) => {
+      if (isCancelled) return;
+
+      setAmapPoisByVillage((current) => ({
+        ...current,
+        [activeVillageId]: pois
+      }));
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeVillageId]);
+
   const selectedNpc =
     allNpcs.find((npc) => npc.id === selectedNpcId) ??
     activeVillageNpcs[0] ??
@@ -410,166 +391,33 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
   const selectedTask = activeTask?.npcId === selectedNpc.id ? activeTask.task : selectedNpc.tasks[0];
   const mapZoomPercent = Math.round(mapView.zoom * 100);
   const mapTransform = `translate(${Math.round(mapView.x)}px, ${Math.round(mapView.y)}px) scale(${mapView.zoom})`;
-  const densityViewMode = getDensityViewMode(mapView.zoom);
   const featuredMarkerMode = getFeaturedMarkerMode(mapView.zoom);
   const featuredMarkerScale = Number((1 / mapView.zoom).toFixed(2));
   const shouldShowVisitorPosition = shouldShowVisitorPositionOnMap(visitorPosition);
   const isNearbyFocusActive = mapView.zoom >= nearbyFocusMinZoom && shouldShowVisitorPosition;
   const visitorMapPosition = projectCoordinatesToMapPercent(visitorPosition);
   const selectedNpcMapPosition = projectCoordinatesToMapPercent(selectedNpc.coordinates);
-  const activeVillageDemoNpcPoints = useMemo(
-    () => demoNpcPoints.filter((point) => point.village === activeVillage),
-    [activeVillage]
-  );
-  const activeVillageDemoNpcClusters = useMemo(
-    () => demoNpcClusters.filter((cluster) => cluster.village === activeVillage),
-    [activeVillage]
-  );
-  const discoveryFilteredDemoNpcPoints = useMemo(
-    () => filterDemoNpcPoints(activeVillageDemoNpcPoints, discoveryFilterId),
-    [activeVillageDemoNpcPoints, discoveryFilterId]
-  );
-  const focusedDemoNpcCluster = focusedClusterId
-    ? demoNpcClusters.find((cluster) => cluster.id === focusedClusterId) ?? null
-    : null;
-  const filteredDemoNpcPoints = useMemo(
-    () => {
-      const scopedPoints = focusedClusterId
-        ? discoveryFilteredDemoNpcPoints.filter((point) => point.clusterId === focusedClusterId)
-        : discoveryFilteredDemoNpcPoints;
-
-      if (!isNearbyFocusActive) {
-        return scopedPoints;
-      }
-
-      return scopedPoints.filter(
-        (point) => getDistanceMeters(visitorPosition, point.coordinates) <= nearbyNpcRadiusMeters
-      );
-    },
-    [discoveryFilteredDemoNpcPoints, focusedClusterId, isNearbyFocusActive, visitorPosition]
-  );
   const visibleNpcs = useMemo(() => {
-    const scopedNpcs = activeVillageNpcs.filter((npc) => matchesNpcThemeFilter(npc, discoveryFilterId));
-
-    if (routePanelOpen || !isNearbyFocusActive) {
-      return scopedNpcs;
-    }
-
-    return scopedNpcs.filter((npc) => getDistanceMeters(visitorPosition, npc.coordinates) <= nearbyNpcRadiusMeters);
-  }, [activeVillageNpcs, discoveryFilterId, isNearbyFocusActive, routePanelOpen, visitorPosition]);
-  const visibleVillagePlaces = useMemo(() => {
-    const scopedPlaces = villagePlaces
-      .filter((place) => place.village === activeVillage)
-      .filter((place) => matchesPlaceThemeFilter(place, discoveryFilterId));
-    const zoomScopedPlaces =
-      mapView.zoom >= 1.25 ? scopedPlaces : scopedPlaces.filter((place) => place.priority === "primary");
-
-    if (!isNearbyFocusActive) {
-      return zoomScopedPlaces;
-    }
-
-    return zoomScopedPlaces.filter(
-      (place) => getDistanceMeters(visitorPosition, place.coordinates) <= nearbyNpcRadiusMeters * 1.8
-    );
-  }, [activeVillage, discoveryFilterId, isNearbyFocusActive, mapView.zoom, visitorPosition]);
-  const selectedVillagePlace = selectedPlaceId
-    ? villagePlaces.find((place) => place.id === selectedPlaceId) ?? null
-    : null;
-  const selectedPlaceMeta = selectedVillagePlace
-    ? placeCategoryMeta[selectedVillagePlace.category]
-    : null;
-  const filteredDemoNpcClusters = useMemo(
-    () => summarizeClustersForFilter(activeVillageDemoNpcClusters, activeVillageDemoNpcPoints, discoveryFilterId),
-    [activeVillageDemoNpcClusters, activeVillageDemoNpcPoints, discoveryFilterId]
-  );
-  const filteredVillageDensity = useMemo(() => {
-    const summaries = new Map<
-      Village,
-      {
-        accent: string;
-        count: number;
-        themeCount: number;
-        weightedX: number;
-        weightedY: number;
-      }
-    >();
-
-    filteredDemoNpcClusters.forEach((cluster) => {
-      const current =
-        summaries.get(cluster.village) ??
-        {
-          accent: cluster.accent,
-          count: 0,
-          themeCount: 0,
-          weightedX: 0,
-          weightedY: 0
-        };
-
-      summaries.set(cluster.village, {
-        ...current,
-        accent: current.count >= cluster.count ? current.accent : cluster.accent,
-        count: current.count + cluster.count,
-        themeCount: current.themeCount + 1,
-        weightedX: current.weightedX + cluster.center.x * cluster.count,
-        weightedY: current.weightedY + cluster.center.y * cluster.count
-      });
-    });
-
-    return Array.from(summaries, ([village, summary]) => ({
-      id: getVillageDensityId(village),
-      village,
-      accent: summary.accent,
-      count: summary.count,
-      themeCount: summary.themeCount,
-      center: villageOverviewPositions[village] ?? {
-        x: summary.weightedX / summary.count,
-        y: summary.weightedY / summary.count
-      }
-    }));
-  }, [filteredDemoNpcClusters]);
-  const labeledDemoNpcPoints = useMemo(
-    () => getDensityPreviewPoints(filteredDemoNpcPoints, 12),
-    [filteredDemoNpcPoints]
-  );
-  const activeDiscoveryFilterLabel = getDiscoveryFilterLabel(discoveryFilterId);
-  const activeDensityScopeLabel = [
-    isNearbyFocusActive ? `${nearbyNpcRadiusMeters} 米内` : "",
-    focusedDemoNpcCluster?.label ??
-      (discoveryFilterId === "all"
-        ? activeVillageShortLabel
-        : `${activeVillageShortLabel} · ${activeDiscoveryFilterLabel}`)
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const densityViewLabel =
-    isNearbyFocusActive
-      ? "附近 NPC"
-      : densityViewMode === "villages"
-      ? "规模预览层"
-      : densityViewMode === "clusters"
-        ? "空间簇"
-        : densityViewMode === "people"
-          ? "个人点位"
-          : "人物标签";
-  const canShowDensityPreviewDots = densityViewMode === "people" || densityViewMode === "expanded";
-  const shouldRenderDensityPreviewDots = canShowDensityPreviewDots && showDensityPreviewPoints;
+    return activeVillageNpcs.filter((npc) => matchesNpcThemeFilter(npc, discoveryFilterId));
+  }, [activeVillageNpcs, discoveryFilterId]);
+  const activeAmapPois = amapPoisByVillage[activeVillageId];
+  const poiMarkerScale = Number((1 / mapView.zoom).toFixed(2));
+  const shouldShowPoiLabels = mapView.zoom >= 1.15;
   const shouldShowGlobalOverviewButton =
     routePanelOpen ||
     isNearbyFocusActive ||
     mapView.zoom > 1.01 ||
-    discoveryFilterId !== "all" ||
-    focusedClusterId !== null ||
-    selectedPlaceId !== null;
+    discoveryFilterId !== "all";
   const mapStateTitle = routePanelOpen ? "路线中" : isNearbyFocusActive ? "附近探索" : `${activeVillage}主览`;
   const mapStateDetail = routePanelOpen
     ? `正在前往 ${selectedNpc.spaceName}`
     : isNearbyFocusActive
-      ? `只看你身边约 ${nearbyNpcRadiusMeters} 米内的主理人`
+      ? `已定位到你附近，地图显示${activeVillage}空间分身与高德食宿点`
       : hasLocatedVisitor && !shouldShowVisitorPosition
-        ? `你离${activeVillage}较远，先保留本村点位`
+        ? `你离${activeVillage}较远，先保留本村空间分身与高德食宿点`
         : hasLocatedVisitor
-          ? `已回到${activeVillage}主理人的点位分布`
-          : `初始浏览：先看${activeVillage}分布，点右下角定位后进入附近探索`;
+          ? `已回到${activeVillage}空间分身与高德食宿点`
+          : `初始浏览：只看${activeVillage}空间分身与高德食宿点`;
   const distanceMeters = useMemo(
     () => Math.round(getDistanceMeters(visitorPosition, selectedNpc.coordinates)),
     [selectedNpc.coordinates, visitorPosition]
@@ -596,13 +444,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
         : "calc(-100% - 16px)"
       : "16px";
   const selectedVoiceCardVerticalShift = shouldDropVoiceCard ? "18px" : "calc(-100% - 18px)";
-  const shouldDropPlaceCard = selectedVillagePlace ? selectedVillagePlace.mapPosition.y < 34 : false;
-  const selectedPlaceCardShift = selectedVillagePlace?.mapPosition.x && selectedVillagePlace.mapPosition.x > 58
-    ? shouldDropPlaceCard
-      ? "calc(-62% - 8px)"
-      : "calc(-100% - 16px)"
-    : "16px";
-  const selectedPlaceCardVerticalShift = shouldDropPlaceCard ? "18px" : "calc(-100% - 14px)";
   const visitBridgeQuestion = `今天适合去${selectedNpc.spaceName}吗？`;
   const breakIceQuestion =
     selectedNpc.suggestedQuestions[0] ?? `我第一次来${selectedNpc.village}，应该怎么靠近你？`;
@@ -716,8 +557,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
 
   const resetMapView = () => {
     setMapView({ zoom: 1, x: 0, y: 0 });
-    setFocusedClusterId(null);
-    setSelectedPlaceId(null);
     mapPanStart.current = null;
     setIsMapPanning(false);
   };
@@ -762,8 +601,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
     setLocationStatus(status);
     setRoutePanelOpen(false);
     setDiscoveryFilterId("all");
-    setFocusedClusterId(null);
-    setSelectedPlaceId(null);
     setArrivalReady(false);
 
     if (nearestNpc) {
@@ -778,11 +615,9 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
   const showGlobalOverview = (status?: string) => {
     setRoutePanelOpen(false);
     setDiscoveryFilterId("all");
-    setFocusedClusterId(null);
-    setSelectedPlaceId(null);
     setMapView({ zoom: 1, x: 0, y: 0 });
     setLocationStatus(
-      status ?? (hasLocatedVisitor ? `已切回${activeVillage}主览` : `${activeVillage}主览，可定位后查看身边的新村民`)
+      status ?? (hasLocatedVisitor ? `已切回${activeVillage}主览` : `${activeVillage}主览，显示空间分身与高德食宿点`)
     );
     mapPanStart.current = null;
     setIsMapPanning(false);
@@ -796,11 +631,8 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
 
     setActiveVillageId(villageId);
     setDiscoveryFilterId("all");
-    setFocusedClusterId(null);
-    setSelectedPlaceId(null);
     setRoutePanelOpen(false);
     setArrivalReady(false);
-    setShowDensityPreviewPoints(false);
     focusMapOnPosition(villageOverviewPositions[nextVillage], 1.55);
     setLocationStatus(`${nextVillage}主览`);
 
@@ -986,7 +818,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
   const startRoute = () => {
     setActiveTask({ npcId: selectedNpc.id, task: selectedTask });
     setRoutePanelOpen(true);
-    setSelectedPlaceId(null);
     setMapZoom(Math.max(mapView.zoom, 1.25));
   };
 
@@ -1000,43 +831,9 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
     setBuilderOpen(false);
     setRoutePanelOpen(false);
     setIsTalkingMapCardOpen(true);
-    setSelectedPlaceId(null);
     setArrivalReady(false);
-    setFocusedClusterId(null);
     dismissMapGuide();
     scrollNpcPanelToTop();
-  };
-
-  const drillIntoVillage = (village: Village) => {
-    setRoutePanelOpen(false);
-    setFocusedClusterId(null);
-    setActiveVillageId(getVillageId(village));
-    setDiscoveryFilterId("all");
-    setMapZoom(Math.max(mapView.zoom, 1.15));
-  };
-
-  const drillIntoCluster = (clusterId: string) => {
-    setRoutePanelOpen(false);
-    setFocusedClusterId(clusterId);
-    setMapZoom(Math.max(mapView.zoom, 1.45));
-  };
-
-  const selectVillagePlace = (placeId: string) => {
-    setSelectedPlaceId(placeId);
-    setIsTalkingMapCardOpen(false);
-    setRoutePanelOpen(false);
-    dismissMapGuide();
-    setMapZoom(Math.max(mapView.zoom, 1.18));
-  };
-
-  const showNpcsNearSelectedPlace = () => {
-    if (!selectedVillagePlace) return;
-
-    setActiveVillageId(getVillageId(selectedVillagePlace.village));
-    setDiscoveryFilterId("all");
-    setFocusedClusterId(null);
-    setSelectedPlaceId(null);
-    setMapZoom(Math.max(mapView.zoom, 1.45));
   };
 
   const simulateArrival = () => {
@@ -1112,7 +909,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
     setBuilderOpen(true);
     setBuilderStep("space");
     setRoutePanelOpen(false);
-    setSelectedPlaceId(null);
     setArrivalReady(false);
     scrollNpcPanelToTop();
   };
@@ -1216,7 +1012,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
     );
     setActiveVillageId(getVillageId(generatedNpc.village));
     setDiscoveryFilterId("all");
-    setFocusedClusterId(null);
     setRoutePanelOpen(false);
     setMapView({ zoom: 1.45, x: 0, y: 0 });
     scrollNpcPanelToTop();
@@ -1401,6 +1196,37 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
             <div className="ridge ridge-three" />
             <span className="village-label longtan">龙潭村</span>
             <span className="village-label siping">四坪村</span>
+            {activeAmapPois.length > 0 && (
+              <div
+                className={`amap-poi-layer ${shouldShowPoiLabels ? "shows-labels" : ""}`}
+                aria-label="高德食宿点"
+              >
+                {activeAmapPois.map((poi) => {
+                  const poiPosition = projectCoordinatesToMapPercent(poi.coordinates);
+                  const poiLabel = amapPoiCategoryLabels[poi.category];
+
+                  return (
+                    <span
+                      className={`amap-poi-marker is-${poi.category}`}
+                      key={poi.id}
+                      role="img"
+                      aria-label={`${poiLabel}：${poi.name}`}
+                      title={`${poiLabel} · ${poi.name}${poi.address ? ` · ${poi.address}` : ""}`}
+                      style={
+                        {
+                          "--poi-scale": poiMarkerScale,
+                          left: `${poiPosition.x}%`,
+                          top: `${poiPosition.y}%`
+                        } as CSSProperties
+                      }
+                    >
+                      {poi.category === "stay" ? <BedDouble size={14} /> : <Utensils size={14} />}
+                      <small>{poi.name}</small>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {shouldShowVisitorPosition && (
               <span
                 className="visitor-dot"
@@ -1410,112 +1236,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
                 <Navigation size={14} />
                 <small>我的位置</small>
               </span>
-            )}
-
-            {!routePanelOpen && (
-              <div
-                className={`density-layer density-${densityViewMode}`}
-                aria-label="100人规模预览"
-              >
-                <span
-                  className="density-watermark"
-                  aria-hidden="true"
-                  data-testid="density-watermark"
-                >
-                  原型预览 · 非真实人物
-                </span>
-                {canShowDensityPreviewDots && !showDensityPreviewPoints && (
-                  <span className="density-preview-note" data-testid="density-preview-note">
-                    小点是未来 100 人规模预览，默认隐藏；真实可点人物是头像标记。
-                  </span>
-                )}
-
-                {shouldRenderDensityPreviewDots &&
-                  filteredDemoNpcPoints.map((point) => {
-                    const pointPosition = projectCoordinatesToMapPercent(point.coordinates);
-
-                    return (
-                      <span
-                        aria-hidden="true"
-                        className="density-person-dot"
-                        data-testid="density-person-dot"
-                        key={point.id}
-                        style={
-                          {
-                            "--dot-color": point.accent,
-                            left: `${pointPosition.x}%`,
-                            top: `${pointPosition.y}%`
-                          } as CSSProperties
-                        }
-                      />
-                    );
-                  })}
-
-                {densityViewMode === "expanded" &&
-                  showDensityPreviewPoints &&
-                  labeledDemoNpcPoints.map((point) => {
-                    const pointPosition = projectCoordinatesToMapPercent(point.coordinates);
-
-                    return (
-                      <span
-                        className="density-person-label"
-                        data-testid="density-person-label"
-                        key={`${point.id}-label`}
-                        style={
-                          {
-                            "--dot-color": point.accent,
-                            "--label-scale": featuredMarkerScale,
-                            left: `${pointPosition.x}%`,
-                            top: `${pointPosition.y}%`
-                          } as CSSProperties
-                        }
-                      >
-                        <i />
-                        <strong>{point.name}</strong>
-                        <small>{point.theme}</small>
-                      </span>
-                    );
-                  })}
-              </div>
-            )}
-
-            {!routePanelOpen && visibleVillagePlaces.length > 0 && (
-              <div
-                className={`village-place-layer ${mapView.zoom >= 1.25 ? "is-expanded" : "is-compact"}`}
-                aria-label="村庄地点"
-              >
-                <span className="place-layer-note">地点层 · 待现场校准</span>
-                {visibleVillagePlaces.map((place) => {
-                  const meta = placeCategoryMeta[place.category];
-
-                  return (
-                    <button
-                      className={`place-marker place-${place.category} ${
-                        selectedPlaceId === place.id ? "is-selected" : ""
-                      }`}
-                      data-testid="village-place-marker"
-                      key={place.id}
-                      type="button"
-                      aria-label={`${place.name}，地点，${meta.label}`}
-                      style={
-                        {
-                          "--place-color": meta.accent,
-                          "--place-scale": featuredMarkerScale,
-                          left: `${place.mapPosition.x}%`,
-                          top: `${place.mapPosition.y}%`
-                        } as CSSProperties
-                      }
-                      onClick={() => selectVillagePlace(place.id)}
-                    >
-                      <MapPin size={13} />
-                      <span>
-                        <strong>{place.name}点位</strong>
-                        <small>{meta.label}</small>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
             )}
 
             {routePanelOpen && (
@@ -1572,10 +1292,8 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
                 onClick={() => {
                   setSelectedNpcId(npc.id);
                   setArrivalReady(false);
-                  setFocusedClusterId(null);
                   setRoutePanelOpen(false);
                   setIsTalkingMapCardOpen(true);
-                  setSelectedPlaceId(null);
                   dismissMapGuide();
                 }}
                   aria-label={`${npc.name}，${npc.spaceName}`}
@@ -1634,39 +1352,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
                 <strong>{routeDistanceLabel}</strong>
                 <span>{selectedNpcMapFunctionLabel}</span>
               </button>
-            )}
-
-            {!routePanelOpen && selectedVillagePlace && selectedPlaceMeta && (
-              <section
-                className={`place-popover ${shouldDropPlaceCard ? "is-below-marker" : ""}`}
-                aria-label={`${selectedVillagePlace.name}地点说明`}
-                style={
-                  {
-                    "--place-card-scale": featuredMarkerScale,
-                    "--place-card-shift-x": selectedPlaceCardShift,
-                    "--place-card-shift-y": selectedPlaceCardVerticalShift,
-                    "--place-color": selectedPlaceMeta.accent,
-                    left: `${selectedVillagePlace.mapPosition.x}%`,
-                    top: `${selectedVillagePlace.mapPosition.y}%`
-                  } as CSSProperties
-                }
-              >
-                <button
-                  className="place-popover-close"
-                  type="button"
-                  aria-label="关闭地点说明"
-                  onClick={() => setSelectedPlaceId(null)}
-                >
-                  <X size={14} />
-                </button>
-                <span>{selectedPlaceMeta.label}</span>
-                <strong>{selectedVillagePlace.name}</strong>
-                <p>{selectedVillagePlace.description}</p>
-                <small>{selectedVillagePlace.sourceNote}</small>
-                <button type="button" onClick={showNpcsNearSelectedPlace}>
-                  查看附近 NPC
-                </button>
-              </section>
             )}
 
             <svg className="terrain-lines" viewBox="0 0 100 100" aria-hidden="true">
@@ -1786,33 +1471,11 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
                 aria-pressed={filter.id === discoveryFilterId}
                 onClick={() => {
                   setDiscoveryFilterId(filter.id);
-                  setFocusedClusterId(null);
                 }}
               >
                 {filter.label}
               </button>
             ))}
-          </div>
-        )}
-
-        {!routePanelOpen && (
-          <div className="density-readout" aria-label="100人规模预览状态">
-            <strong>100 人规模预览</strong>
-            <span>{densityViewLabel}</span>
-            <small>
-              显示 {filteredDemoNpcPoints.length} / {demoNpcPoints.length}
-              {activeDensityScopeLabel ? ` · ${activeDensityScopeLabel}` : ""}
-            </small>
-            {canShowDensityPreviewDots && (
-              <button
-                className="density-preview-toggle"
-                type="button"
-                aria-pressed={showDensityPreviewPoints}
-                onClick={() => setShowDensityPreviewPoints((current) => !current)}
-              >
-                {showDensityPreviewPoints ? "隐藏预览点" : "显示预览点"}
-              </button>
-            )}
           </div>
         )}
 
@@ -1834,11 +1497,16 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
           type="button"
           className="npc-sheet-handle"
           onClick={() => setIsSheetExpanded((prev) => !prev)}
-          aria-label={isSheetExpanded ? "收起村民列表" : "展开村民列表"}
+          aria-label={isSheetExpanded ? "返回地图" : "展开村民列表"}
           aria-expanded={isSheetExpanded}
         >
           <span className="npc-sheet-grabber" aria-hidden="true" />
-          {!isSheetExpanded && (
+          {isSheetExpanded ? (
+            <span className="npc-sheet-return">
+              <ChevronDown size={16} aria-hidden="true" />
+              <span>返回地图</span>
+            </span>
+          ) : (
             <span className="npc-sheet-summary">
               <span className="npc-sheet-summary-avatar" style={{ background: selectedNpc.avatarGradient }}>
                 {selectedNpc.name.slice(0, 1)}
@@ -1924,15 +1592,15 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
                 {selectedNpc.todayStatus.availability === "closed_today" ? "留个话给他" : "先聊一句"}
               </span>
             </button>
-            <button
+            <a
               className="panel-secondary-action"
-              type="button"
+              href={amapNavigationUrl}
               onClick={startRoute}
-              aria-label="导航去找当前人物"
+              aria-label={`导航去找${selectedNpc.name}`}
             >
               <Navigation size={17} aria-hidden="true" />
               <span>导航去找{selectedNpc.name}</span>
-            </button>
+            </a>
             <span className="panel-quick-actions-note">
               <Footprints size={16} aria-hidden="true" />
               约 {walkingMinutes} 分钟可达
@@ -2057,10 +1725,10 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
                 <button type="button" onClick={() => startTask(selectedNpc, selectedTask)}>
                   领取任务
                 </button>
-                <button type="button" onClick={startRoute}>
+                <a href={amapNavigationUrl} onClick={startRoute}>
                   <Route size={15} />
                   出发导航
-                </button>
+                </a>
                 <button type="button" onClick={simulateArrival}>
                   模拟靠近
                 </button>
@@ -2106,8 +1774,6 @@ function VisitorApp({ portal = "visitor", customNpcs: customNpcsProp, setCustomN
                   <a
                     className="external-map-link"
                     href={amapNavigationUrl}
-                    target="_blank"
-                    rel="noreferrer"
                   >
                     <ExternalLink size={15} />
                     打开高德地图导航

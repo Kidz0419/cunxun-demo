@@ -113,7 +113,7 @@ describe("NPC repository API", () => {
     const client = await createTestClient({
       amapFetch,
       env: {
-        VITE_AMAP_KEY: "amap-public-key",
+        AMAP_WEB_SERVICE_KEY: "amap-public-key",
         AMAP_SECURITY_JS_CODE: "server-secret"
       } as NodeJS.ProcessEnv
     });
@@ -125,6 +125,115 @@ describe("NPC repository API", () => {
     expect(amapFetch).toHaveBeenCalledWith(
       "https://restapi.amap.com/v3/place/text?keywords=%E6%9D%91%E5%AF%BB&jscode=server-secret"
     );
+  });
+
+  it("returns 高德民宿和餐厅 POI without creating profile mock data", async () => {
+    const amapFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "1",
+            pois: [
+              {
+                id: "B0STAY",
+                name: "屏南小福地民宿",
+                type: "住宿服务;住宿服务相关",
+                address: "四坪村内",
+                location: "119.082481,26.793512"
+              }
+            ]
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "1",
+            pois: [
+              {
+                id: "B0FOOD",
+                name: "村口饭店",
+                type: "餐饮服务;中餐厅",
+                address: "四坪村口",
+                location: "119.081981,26.793112"
+              }
+            ]
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 }
+        )
+      );
+    const client = await createTestClient({
+      amapFetch,
+      env: {
+        AMAP_WEB_SERVICE_KEY: "amap-public-key",
+        AMAP_SECURITY_JS_CODE: "server-secret"
+      } as NodeJS.ProcessEnv
+    });
+
+    const response = await client.get("/api/amap-pois?village=siping");
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      schemaVersion: 1,
+      source: "amap",
+      villageId: "siping",
+      pois: [
+        {
+          id: "B0STAY",
+          source: "amap",
+          category: "stay",
+          name: "屏南小福地民宿"
+        },
+        {
+          id: "B0FOOD",
+          source: "amap",
+          category: "food",
+          name: "村口饭店"
+        }
+      ]
+    });
+    expect(payload.pois[0]).not.toHaveProperty("story");
+    expect(payload.pois[0]).not.toHaveProperty("tasks");
+    expect(payload.pois[0]).not.toHaveProperty("welcomeMessage");
+  });
+
+  it("returns an empty 高德 POI layer when no AMap key is configured", async () => {
+    const amapFetch = vi.fn();
+    const client = await createTestClient({ amapFetch });
+
+    const response = await client.get("/api/amap-pois?village=siping");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      schemaVersion: 1,
+      source: "amap",
+      villageId: "siping",
+      pois: []
+    });
+    expect(amapFetch).not.toHaveBeenCalled();
+  });
+
+  it("exposes the backend Skill profile used to configure a digital avatar", async () => {
+    const client = await createTestClient();
+
+    const response = await client.get("/api/npcs/qinghe/skills");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      schemaVersion: 1,
+      npcId: "qinghe",
+      npcName: "青禾",
+      skills: {
+        persona: { label: "人设 Skill" },
+        scene: { label: "场景 Skill" },
+        task: { label: "任务 Skill" },
+        boundary: { label: "边界 Skill" },
+        ops: { label: "运营 Skill", reviewStatus: "demo" }
+      }
+    });
   });
 
   it("keeps new villager submissions pending until approved for the visitor map", async () => {

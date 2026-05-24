@@ -1,5 +1,7 @@
 import express from "express";
+import { npcs as baseNpcs } from "../src/data/npcs.js";
 import type { VillagerSubmission } from "../src/domain/npcSubmission.js";
+import { createNpcSkillProfile } from "../src/domain/npcSkillProfile.js";
 import type { NpcChatRequest } from "../src/shared/chatContract.js";
 import type { SystemStatusResponse } from "../src/shared/systemStatus.js";
 import { createNpcChatResponse } from "./chatService.js";
@@ -18,10 +20,14 @@ import {
   parseShopDirectoryQuery,
   shopDirectorySchemaVersion,
   type ShopProfilePatch,
-  type ShopRepository,
-  type ShopStoreStatus
+  type ShopRepository
 } from "./shopRepository.js";
 import { createSupabaseShopRepositoryFromEnv } from "./supabaseShopRepository.js";
+import {
+  fetchAmapVillagePois,
+  isAmapPoiVillageId
+} from "./amapPoiService.js";
+import { amapPoiSchemaVersion } from "../src/shared/amapPoiContract.js";
 
 type CreateAppOptions = {
   amapFetch?: typeof fetch;
@@ -64,6 +70,7 @@ const createDefaultShopRepository = () =>
   createSupabaseShopRepositoryFromEnv() ?? createMemoryShopRepository();
 
 const getAmapKey = (env: NodeJS.ProcessEnv) => env.VITE_AMAP_KEY ?? env.AMAP_KEY;
+const getAmapWebServiceKey = (env: NodeJS.ProcessEnv) => env.AMAP_WEB_SERVICE_KEY ?? env.AMAP_KEY;
 const getAmapSecurityCode = (env: NodeJS.ProcessEnv) =>
   env.AMAP_SECURITY_JS_CODE ?? env.VITE_AMAP_SECURITY_JS_CODE;
 
@@ -83,14 +90,13 @@ const createAmapProxyUrl = (originalUrl: string, securityJsCode: string) => {
 const createSystemStatus = (
   npcRepository: NpcRepository,
   shopRepository: ShopRepository,
-  env: NodeJS.ProcessEnv,
-  shopStoreStatus: ShopStoreStatus = "ready"
+  env: NodeJS.ProcessEnv
 ): SystemStatusResponse => {
   const hasDeepSeek = Boolean(env.DEEPSEEK_API_KEY);
   const hasAmap = Boolean(getAmapKey(env));
   const hasAmapProxy = Boolean(getAmapSecurityCode(env));
   const hasSupabase = npcRepository.kind === "supabase";
-  const hasSupabaseShopDirectory = shopRepository.kind === "supabase" && shopStoreStatus === "ready";
+  const hasSupabaseShopDirectory = shopRepository.kind === "supabase";
 
   return {
     ok: true,
@@ -114,18 +120,6 @@ const createSystemStatus = (
             label: "Supabase 小店目录",
             detail: "v2 主理人小店资料会写入 Supabase，游客端按筛选读取"
           }
-        : shopRepository.kind === "supabase" && shopStoreStatus === "missing_table"
-          ? {
-              status: "local_demo",
-              label: "Supabase 表未初始化",
-              detail: "已配置 Supabase key，但缺少 public.shop_profiles；当前使用 v2 原型种子数据兜底"
-            }
-          : shopRepository.kind === "supabase" && shopStoreStatus === "unavailable"
-            ? {
-                status: "local_demo",
-                label: "Supabase 暂不可用",
-                detail: "已配置 Supabase key，但小店表暂时不可访问；当前使用 v2 原型种子数据兜底"
-              }
         : {
             status: "local_demo",
             label: "本地小店目录",
@@ -224,9 +218,8 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/api/health", async (_request, response) => {
-    const shopStoreStatus = (await shopRepository.getStoreStatus?.()) ?? "ready";
-    response.json(createSystemStatus(npcRepository, shopRepository, env, shopStoreStatus));
+  app.get("/api/health", (_request, response) => {
+    response.json(createSystemStatus(npcRepository, shopRepository, env));
   });
 
   app.get("/api/amap-config", (_request, response) => {
@@ -243,6 +236,37 @@ export function createApp(options: CreateAppOptions = {}) {
       key,
       ...(securityJsCode ? { serviceHost: "/_AMapService" } : {})
     });
+  });
+
+  app.get("/api/amap-pois", async (request, response) => {
+    const villageId = request.query.village;
+
+    if (!isAmapPoiVillageId(villageId)) {
+      response.status(400).json({ error: "village must be siping or longtan" });
+      return;
+    }
+
+    try {
+      response.json({
+        schemaVersion: amapPoiSchemaVersion,
+        source: "amap",
+        villageId,
+        pois: await fetchAmapVillagePois({
+          villageId,
+          key: getAmapWebServiceKey(env),
+          securityJsCode: getAmapSecurityCode(env),
+          fetchImpl: amapFetch
+        })
+      });
+    } catch (error) {
+      console.warn("[cunxun] AMap POI search failed:", error);
+      response.json({
+        schemaVersion: amapPoiSchemaVersion,
+        source: "amap",
+        villageId,
+        pois: []
+      });
+    }
   });
 
   app.use("/_AMapService", async (request, response) => {
@@ -280,6 +304,24 @@ export function createApp(options: CreateAppOptions = {}) {
         schemaVersion: npcRepositorySchemaVersion,
         npcs: await npcRepository.listApprovedCustomNpcs()
       });
+    } catch (error) {
+      handleRouteError(response, error);
+    }
+  });
+
+  app.get("/api/npcs/:npcId/skills", async (request, response) => {
+    try {
+      const approvedCustomNpcs = await npcRepository.listApprovedCustomNpcs();
+      const npc =
+        baseNpcs.find((item) => item.id === request.params.npcId) ??
+        approvedCustomNpcs.find((item) => item.id === request.params.npcId);
+
+      if (!npc) {
+        response.status(404).json({ error: "NPC not found" });
+        return;
+      }
+
+      response.json(createNpcSkillProfile(npc));
     } catch (error) {
       handleRouteError(response, error);
     }

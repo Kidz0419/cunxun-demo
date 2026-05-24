@@ -9,8 +9,26 @@ describe("createAmapNavigationUrl", () => {
       toName: "溪头厝与西溪河岸"
     });
 
-    expect(url).toBe(
-      "https://uri.amap.com/navigation?to=119.070410%2C26.776130%2C%E6%BA%AA%E5%A4%B4%E5%8E%9D%E4%B8%8E%E8%A5%BF%E6%BA%AA%E6%B2%B3%E5%B2%B8&mode=walk&src=cunxun&callnative=1&from=119.071480%2C26.775920%2C%E6%88%91%E7%9A%84%E4%BD%8D%E7%BD%AE"
-    );
+    const parsed = new URL(url);
+
+    expect(parsed.origin + parsed.pathname).toBe("https://uri.amap.com/navigation");
+    expect(parsed.searchParams.get("from")).toBe("119.071480,26.775920,我的位置");
+    expect(parsed.searchParams.get("to")).toBe("119.070410,26.776130,溪头厝与西溪河岸");
+    expect(parsed.searchParams.get("mode")).toBe("walk");
+    expect(parsed.searchParams.get("src")).toBe("cunxun");
+    expect(parsed.searchParams.get("callnative")).toBe("1");
+  });
+
+  it("keeps an empty from parameter so mobile 高德 can use current location", () => {
+    const url = createAmapNavigationUrl({
+      to: { lat: 26.77613, lng: 119.07041 },
+      toName: "溪头厝与西溪河岸"
+    });
+
+    const parsed = new URL(url);
+
+    expect(parsed.searchParams.get("from")).toBe("");
+    expect(parsed.searchParams.get("to")).toBe("119.070410,26.776130,溪头厝与西溪河岸");
+    expect(parsed.searchParams.get("callnative")).toBe("1");
   });
 });

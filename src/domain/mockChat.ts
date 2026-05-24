@@ -1,26 +1,28 @@
 import type { ChatAction, Npc, NpcReply } from "../types.js";
-
-const bookingKeywords = ["预约", "多少钱", "价格", "营业", "开放", "房源", "电话", "联系"];
-const taskKeywords = ["做什么", "任务", "体验", "下午", "怎么玩", "开始", "路线"];
+import { createNpcSkillProfile } from "./npcSkillProfile.js";
 
 const hasAnyKeyword = (text: string, keywords: string[]) =>
   keywords.some((keyword) => text.includes(keyword));
 
 export function createMockNpcReply(npc: Npc, message: string): NpcReply {
+  const skillProfile = createNpcSkillProfile(npc);
   const task = npc.tasks[0];
 
-  if (hasAnyKeyword(message, bookingKeywords)) {
+  if (hasAnyKeyword(message, skillProfile.skills.boundary.handoffKeywords)) {
+    const matchedKeyword = skillProfile.skills.boundary.handoffKeywords.find((keyword) =>
+      message.includes(keyword)
+    );
     const actions: ChatAction[] = npc.humanHandoff.enabled
       ? [{ type: "human_handoff", label: "联系真人确认", npcId: npc.id }]
       : [];
 
     return {
-      text: `${npc.humanHandoff.handoffText} 我可以先帮你了解${npc.spaceName}的气质和适合你的到访方式，但价格、预约和真实开放状态都需要真人确认。`,
+      text: `${skillProfile.skills.boundary.handoffText} 关于${matchedKeyword ?? "现场状态"}的问题需要真人确认。我可以先帮你了解${npc.spaceName}的气质和适合你的到访方式，但价格、预约、开放、安全、工具和食宿都不能由数字分身直接承诺。`,
       actions
     };
   }
 
-  if (hasAnyKeyword(message, taskKeywords)) {
+  if (hasAnyKeyword(message, skillProfile.skills.task.intentKeywords)) {
     return {
       text: `${npc.welcomeMessage} 如果你愿意，我想把「${task.title}」交给你：${task.description}`,
       recommendedTask: task,

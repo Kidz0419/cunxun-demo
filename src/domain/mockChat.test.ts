@@ -17,4 +17,12 @@ describe("createMockNpcReply", () => {
     expect(reply.text).toContain("真人确认");
     expect(reply.actions.map((action) => action.type)).toContain("human_handoff");
   });
+
+  it("uses the boundary Skill for safety questions too", () => {
+    const reply = createMockNpcReply(npcs[0], "今晚去会不会有安全问题？");
+
+    expect(reply.text).toContain("真人确认");
+    expect(reply.text).toContain("安全");
+    expect(reply.actions.map((action) => action.type)).toContain("human_handoff");
+  });
 });

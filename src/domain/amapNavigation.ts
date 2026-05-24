@@ -12,14 +12,11 @@ const formatCoordinateParam = (coordinates: Coordinates, name: string) =>
 export function createAmapNavigationUrl({ from, to, toName }: AmapNavigationInput) {
   const params = new URLSearchParams();
 
+  params.set("from", from ? formatCoordinateParam(from, "我的位置") : "");
   params.set("to", formatCoordinateParam(to, toName));
   params.set("mode", "walk");
   params.set("src", "cunxun");
   params.set("callnative", "1");
-
-  if (from) {
-    params.set("from", formatCoordinateParam(from, "我的位置"));
-  }
 
   return `https://uri.amap.com/navigation?${params.toString()}`;
 }

@@ -25,7 +25,7 @@ const createSupabaseItem = (env: NodeJS.ProcessEnv): LaunchReadinessItem => {
       label: "Supabase 后端",
       status: "ready",
       requiredFromUser: false,
-      message: "已配置 SUPABASE_URL 和 SUPABASE_SERVICE_ROLE_KEY；还需确保已执行 Supabase SQL 并运行 npm run seed:shops。"
+      message: "已配置 SUPABASE_URL 和 SUPABASE_SERVICE_ROLE_KEY。"
     };
   }
 

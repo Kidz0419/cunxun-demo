@@ -10,8 +10,7 @@
     "preview": "npm run build && tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:ready": "tsx scripts/check-ready.ts",
-    "seed:shops": "tsx scripts/seed-shop-profiles.ts"
+    "check:ready": "tsx scripts/check-ready.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.1",

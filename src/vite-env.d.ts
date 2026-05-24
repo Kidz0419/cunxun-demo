@@ -18,6 +18,22 @@ interface Window {
         zoom: number;
       }
     ) => { destroy: () => void };
+    plugin?: (plugins: string[], callback: () => void) => void;
+    PlaceSearch?: new (options: {
+      city: string;
+      citylimit: boolean;
+      extensions: string;
+      pageIndex: number;
+      pageSize: number;
+      type: string;
+    }) => {
+      searchNearBy: (
+        keyword: string,
+        center: [number, number],
+        radius: number,
+        callback: (status: string, result: unknown) => void
+      ) => void;
+    };
   };
   _AMapSecurityConfig?: {
     securityJsCode?: string;
